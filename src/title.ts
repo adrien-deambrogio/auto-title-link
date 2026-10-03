@@ -2,7 +2,41 @@
  * Pure helpers (no Obsidian imports) so they can be unit-tested.
  */
 
-/** Returns the trimmed text if it is a single http(s) URL, otherwise null. */
+/** Returns the trimmed text if it is a single http(s) URL, otherwise null.
+ * `parseUrl` takes the pasted text and decides whether it is a single, valid web address. It returns the URL if so, and `null` otherwise. In `main.ts` that return value is the gate: if it's `null`, the plugin does nothing and the paste proceeds normally.
+ * 
+ * Step by step:
+ * 
+ * 1. **Trim**: `text.trim()` removes leading and trailing whitespace,
+ * so a URL copied with a trailing newline or space still works.
+ * 
+ * 2. **Reject empty or multi-part text**: `if (!t || /\s/.test(t)) return null;`
+ * bails out if the string is empty or contains any whitespace inside it.
+ * This means `https://example.com some words` or two URLs on separate lines are not treated as a URL.
+ * 
+ * 3. **Validate with the `URL` constructor**: `new URL(t)` throws if the string isn't
+ * a well-formed absolute URL (for example, `example.com` with no scheme, or `hello`).
+ * The `catch` turns that into `null`.
+ * 
+ * 4. **Allow only http and https**: if parsing succeeds, it returns `t` only
+ * when the protocol is `http:` or `https:`. Things like `ftp://...`, `mailto:...`,
+ * `file:///...` or `obsidian://...` return `null`.
+ * 
+ * A few examples:
+ * 
+ * | Pasted text | Result |
+ * |---|---|
+ * | `https://example.com/page` | `"https://example.com/page"` |
+ * | `  https://example.com  ` | `"https://example.com"` (trimmed) |
+ * | `example.com` | `null` (no scheme) |
+ * | `https://a.com https://b.com` | `null` (contains whitespace) |
+ * | `mailto:me@example.com` | `null` (wrong protocol) |
+ * | `check this https://example.com` | `null` (contains whitespace) |
+ * 
+ * It returns the trimmed original string, not `u.href`, so the URL is not normalized
+ * (no added trailing slash, no lowercased host). The link inserted into the note
+ * is exactly what the user pasted.
+ */
 export function validateURL(text: string): string | null {
   const t = text.trim();
   if (!t || /\s/.test(t)) return null;
@@ -56,14 +90,6 @@ export function buildLink(title: string, url: string): string {
   return `[${escapeLinkText(title)}](${encodeLinkUrl(url)})`;
 }
 
-/** Domain name used as the fallback title (leading "www." removed). */
-export function hostnameOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
 
 /** Index of the occurrence of `needle` in `haystack` closest to `around`, or -1. */
 export function findNearest(haystack: string, needle: string, around: number): number {

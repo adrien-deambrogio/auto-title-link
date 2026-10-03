@@ -1,114 +1,135 @@
 import {
-	Editor,
-	MarkdownView,
-	MarkdownFileInfo,
-	Modal,
-	Notice,
-	Plugin,
-} from 'obsidian';
+  Editor,
+  MarkdownFileInfo,
+  MarkdownView,
+  Plugin,
+  TFile,
+  requestUrl,
+} from "obsidian";
 import {
-	DEFAULT_SETTINGS,
-	MyPluginSettings,
-	SampleSettingTab,
-} from './settings';
+  buildLink,
+  extractTitle,
+  findNearest,
+  hostnameOf,
+  validateURL as validateURL,
+} from "./title";
 
-// Remember to rename these classes and interfaces!
+const FETCH_TIMEOUT_MS = 10_000;
+const PLACEHOLDER_TITLE = "Fetching title…";
 
-export default class MyPlugin extends Plugin {
-	settings!: MyPluginSettings;
+export default class PasteUrlTitlePlugin extends Plugin {
+  async onload() {
+    this.registerEvent(
+      this.app.workspace.on(
+        "editor-paste",
+        (evt: ClipboardEvent, editor: Editor, info: MarkdownView | MarkdownFileInfo) => {
+          if (evt.defaultPrevented) return;
 
-	async onload() {
-		await this.loadSettings();
+          const url = validateURL(evt.clipboardData?.getData("text/plain") ?? "");
+          if (!url) return;
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
+          // Skip: text selected (Obsidian handles it).
+          if (editor.somethingSelected()) return;
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
+          evt.preventDefault();
+          void this.convert(editor, info.file ?? null, url);
+        }
+      )
+    );
+  }
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			},
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (
-				editor: Editor,
-				_ctx: MarkdownView | MarkdownFileInfo,
-			) => {
-				editor.replaceSelection('Sample editor command');
-			},
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+  /** Inserts a placeholder link, fetches the title, then swaps in the final link. */
+  private async convert(editor: Editor, file: TFile | null, url: string) {
+    const placeholder = buildLink(PLACEHOLDER_TITLE, url);
+    const offset = editor.posToOffset(editor.getCursor());
+    editor.replaceSelection(placeholder);
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			},
-		});
+    let title: string | null = null;
+    try {
+      title = await fetchTitle(url);
+    } catch (err) {
+      console.debug("[paste-url-title] fetch failed, using domain:", err);
+    }
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+    const link = buildLink(title ?? hostnameOf(url), url);
+    if (link === placeholder) return;
+    await this.swap(file, editor, offset, placeholder, link);
+  }
 
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(activeDocument, 'click', (_evt: MouseEvent) => {
-			new Notice('Click');
-		});
+  /** Replaces the placeholder wherever it now lives; does nothing if the user removed it. */
+  private async swap(
+    file: TFile | null,
+    editor: Editor,
+    offset: number,
+    placeholder: string,
+    link: string
+  ) {
+    if (!file) {
+      replaceInEditor(editor, offset, placeholder, link);
+      return;
+    }
 
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(
-			window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000),
-		);
-	}
+    // The user may have switched notes: target the editor showing the original file.
+    const view = this.app.workspace
+      .getLeavesOfType("markdown")
+      .map((leaf) => leaf.view)
+      .find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === file.path);
 
-	onunload() {}
+    if (view) {
+      replaceInEditor(view.editor, offset, placeholder, link);
+      return;
+    }
 
-	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<MyPluginSettings>,
-		);
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
+    // File no longer open: edit it on disk.
+    await this.app.vault.process(file, (data) => {
+      const idx = findNearest(data, placeholder, offset);
+      if (idx === -1) return data;
+      return data.slice(0, idx) + link + data.slice(idx + placeholder.length);
+    });
+  }
 }
 
-class SampleModal extends Modal {
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.setText('Woah!');
-	}
+function replaceInEditor(
+  editor: Editor,
+  offset: number,
+  placeholder: string,
+  link: string
+): boolean {
+  const doc = editor.getValue();
+  const idx = doc.startsWith(placeholder, offset)
+    ? offset
+    : findNearest(doc, placeholder, offset);
+  if (idx === -1) return false;
+  editor.replaceRange(
+    link,
+    editor.offsetToPos(idx),
+    editor.offsetToPos(idx + placeholder.length)
+  );
+  return true;
+}
 
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
+async function fetchTitle(url: string): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timeout")), FETCH_TIMEOUT_MS);
+  });
+
+  try {
+    const res = await Promise.race([
+      requestUrl({
+        url,
+        method: "GET",
+        headers: { Accept: "text/html,application/xhtml+xml" },
+      }),
+      timeout,
+    ]);
+
+    const contentType =
+      Object.entries(res.headers).find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
+    if (contentType && !/html|xml/i.test(contentType)) return null;
+
+    return extractTitle(res.text);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

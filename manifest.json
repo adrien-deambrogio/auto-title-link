@@ -1,9 +1,9 @@
 {
-  "id": "paste-url-title",
-  "name": "Paste URL Title",
+  "id": "auto-id",
+  "name": "Auto ID",
   "version": "1.0.0",
   "minAppVersion": "1.4.0",
-  "description": "Automatically turns pasted URLs into Markdown links using the page's title.",
-  "author": "You",
-  "isDesktopOnly": true
+  "description": "Assigns sequential IDs by folder",
+  "author": "you",
+  "isDesktopOnly": false
 }

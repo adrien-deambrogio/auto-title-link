@@ -5,7 +5,6 @@ import { resolveTemplate } from "./template";
 export interface FolderRule {
   folder: string; // vault-relative folder path, e.g. "questions" or "work/projects"
   prefix: string; // e.g. "Q" -> Q-1, Q-2...
-  placeholder: string; // literal text replaced with the note name, e.g. "Q-"
   templatePath: string; // vault-relative path of the template note, e.g. "templates/Question"
 }
 
@@ -17,16 +16,12 @@ export interface AutoIdSettings {
 const DEFAULT_RULE: FolderRule = {
   folder: "",
   prefix: "",
-  placeholder: "",
   templatePath: "",
 };
 
 export const DEFAULT_SETTINGS: AutoIdSettings = {
   titleKey: "title",
-  rules: [
-    { ...DEFAULT_RULE, folder: "questions", prefix: "Q" },
-    { ...DEFAULT_RULE, folder: "projects", prefix: "P" },
-  ],
+  rules: [],
 };
 
 // Fills in missing fields, e.g. when loading data saved by an older version
@@ -128,15 +123,6 @@ export class AutoIdSettingTab extends PluginSettingTab {
 
     const templateSetting = new Setting(containerEl)
       .setDesc(this.templateStatus(rule.templatePath))
-      .addText((t) =>
-        t
-          .setPlaceholder("Text to replace, e.g. Q-")
-          .setValue(rule.placeholder)
-          .onChange(async (v) => {
-            rule.placeholder = v;
-            await this.plugin.saveSettings();
-          })
-      )
       .addText((t) =>
         t
           .setPlaceholder("Template path")

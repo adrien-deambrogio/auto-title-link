@@ -22,8 +22,7 @@ export async function isEmptyNote(app: App, file: TFile): Promise<boolean> {
 }
 
 /**
- * Adds the template's missing frontmatter fields and its body to the note,
- * replacing the rule's placeholder with the note name in the body.
+ * Adds the template's missing frontmatter fields and its body to the note.
  */
 export async function applyTemplate(
   app: App,
@@ -54,10 +53,7 @@ export async function applyTemplate(
     });
   }
 
-  let body = raw.slice(info.contentStart);
-  if (rule.placeholder) {
-    body = body.split(rule.placeholder).join(file.basename);
-  }
+  const body = raw.slice(info.contentStart);
 
   // The note body is empty at this point, so keep the frontmatter and append the template body
   await app.vault.process(file, (data) => {

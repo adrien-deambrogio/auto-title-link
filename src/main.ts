@@ -1,4 +1,4 @@
-import { Plugin, TAbstractFile, TFile, sleep } from "obsidian";
+import { Plugin, TAbstractFile, TFile } from "obsidian";
 import { AutoIdSettings, AutoIdSettingTab, normalizeSettings } from "./settings";
 import { assignId } from "./id";
 import { applyTemplate, isEmptyNote } from "./template";
@@ -29,7 +29,7 @@ export default class AutoIdPlugin extends Plugin {
 
   private async process(file: TFile) {
     // Let Obsidian/Bases/sync finish writing the file
-    await sleep(300);
+    //await sleep(300);
     if (!this.app.vault.getAbstractFileByPath(file.path)) return;
 
     const rule = this.settings.rules.find(

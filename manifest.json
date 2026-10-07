@@ -2,8 +2,8 @@
   "id": "auto-id",
   "name": "Auto ID",
   "version": "1.0.0",
-  "minAppVersion": "1.4.0",
-  "description": "Assigns sequential IDs by folder",
-  "author": "you",
-  "isDesktopOnly": false
+  "minAppVersion": "1.5.7",
+  "description": "Renames new notes to an incremental ID per folder, applies a template, and prompts for a title stored in frontmatter.",
+  "author": "Your name",
+  "isDesktopOnly": true
 }

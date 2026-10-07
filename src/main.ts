@@ -1,16 +1,13 @@
-import { Notice, Plugin, TFile, TAbstractFile } from "obsidian";
-import {
-  AutoIdSettings,
-  AutoIdSettingTab,
-  DEFAULT_SETTINGS,
-} from "./settings";
-
-const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+import { Plugin, TAbstractFile, TFile, sleep } from "obsidian";
+import { AutoIdSettings, AutoIdSettingTab, normalizeSettings } from "./settings";
+import { assignId } from "./id";
+import { applyTemplate, isEmptyNote } from "./template";
+import { promptTitle } from "./title";
 
 export default class AutoIdPlugin extends Plugin {
   settings!: AutoIdSettings;
 
-  // Serializes all work so two quick creations can't grab the same number
+  // Serializes ID + template work so two quick creations can't grab the same number
   private queue: Promise<void> = Promise.resolve();
 
   async onload() {
@@ -19,70 +16,45 @@ export default class AutoIdPlugin extends Plugin {
 
     // Skip the burst of 'create' events fired while the vault indexes at startup
     this.app.workspace.onLayoutReady(() => {
-      this.registerEvent(
-        this.app.vault.on("create", (f) => this.enqueue(f))
-      );
-      // 'rename' fires for both renames and moves
-      this.registerEvent(
-        this.app.vault.on("rename", (f) => this.enqueue(f))
-      );
-      // Optional: assign the ID on first edit instead of on creation
-      // this.registerEvent(this.app.vault.on("modify", (f) => this.enqueue(f)));
-    });
-
-    // Manual trigger for the active note
-    this.addCommand({
-      id: "assign-id-to-current-note",
-      name: "Assign ID to current note",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file) return false;
-        if (!checking) this.enqueue(file);
-        return true;
-      },
+      this.registerEvent(this.app.vault.on("create", (f) => this.enqueue(f)));
     });
   }
 
   private enqueue(file: TAbstractFile) {
     if (!(file instanceof TFile) || file.extension !== "md") return;
     this.queue = this.queue
-      .then(() => this.assignId(file))
+      .then(() => this.process(file))
       .catch((e) => console.error("[auto-id]", e));
   }
 
-  private async assignId(file: TFile) {
-    // File may have been deleted/renamed while waiting in the queue
+  private async process(file: TFile) {
+    // Let Obsidian/Bases/sync finish writing the file
+    await sleep(300);
     if (!this.app.vault.getAbstractFileByPath(file.path)) return;
 
-    const folder = file.parent;
-    if (!folder) return;
-
     const rule = this.settings.rules.find(
-      (r) => r.folder && r.prefix && r.folder === folder.path
+      (r) => r.folder && r.prefix && r.folder === file.parent?.path
     );
     if (!rule) return;
 
-    const pattern = new RegExp(`^${escapeRegex(rule.prefix)}-(\\d+)$`);
+    // Evaluated before anything is written, so template and title only apply to new, empty notes
+    const isNew = await isEmptyNote(this.app, file);
 
-    // Already valid: nothing to do (also stops rename loops)
-    if (pattern.test(file.basename)) return;
+    await assignId(this.app, file, rule);
+    if (!isNew) return;
 
-    // Let Obsidian/sync finish writing the file
-    await new Promise((r) => setTimeout(r, 300));
+    await applyTemplate(this.app, file, rule);
 
-    let max = 0;
-    for (const child of folder.children) {
-      if (!(child instanceof TFile) || child.extension !== "md") continue;
-      const m = child.basename.match(pattern);
-      if (m && m[1] !== undefined) max = Math.max(max, parseInt(m[1], 10));
-    }
-
-    const newPath = `${folder.path}/${rule.prefix}-${max + 1}.${file.extension}`;
-    await this.app.fileManager.renameFile(file, newPath);
+    // Not awaited: waiting on the user must not block the queue
+    void promptTitle(this.app, file, this.settings.titleKey).catch((e) =>
+      console.error("[auto-id]", e)
+    );
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.settings = normalizeSettings(
+      (await this.loadData()) as Partial<AutoIdSettings> | null
+    );
   }
 
   async saveSettings() {
